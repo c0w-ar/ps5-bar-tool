@@ -27,17 +27,6 @@ int main() {
     // Read header size 0x58
     read_header(&session);
 
-    log_printf("session.mode: %d\n", session.mode);
-    log_printf("session.version: %d\n", session.version);
-    log_printf("session.key: ");
-        for (int i = 0; i < 0x10; i++) {
-        log_printf("%02x%c", session.key[i], (i == 15) ? '\n' : '.');
-    }
-    log_printf("session.iv: ");
-        for (int i = 0; i < 0xC; i++) {
-        log_printf("%02x%c", session.iv[i], (i == 0xB) ? '\n' : '.');
-    }
-
     // This header is 0x400
     decrypted_size = decrypt_segment(&session, &buffer, 1, 0, 0);
 
@@ -68,8 +57,8 @@ int main() {
     log_printf("Hardware Number: %d\n", bar_hw_number);
     log_printf("Console Name: %s\n", bar_console_name);
     log_printf("File Description: %s\n", bar_description);
-    log_printf("Total files in Backup: %d", bar_total_files);
-    log_printf("Total folders in Backup: %d", bar_total_dirs);
+    log_printf("Total files in Backup: %d\n", bar_total_files);
+    log_printf("Total folders in Backup: %d\n", bar_total_dirs);
     log_printf("\n\n");
     log_printf("*** Users in BAR file ***\n\n");
     for(int i=0; i<bar_total_users; i++) {
