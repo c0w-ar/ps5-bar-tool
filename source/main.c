@@ -319,6 +319,12 @@ uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, in
         return -1;
     }
 
+    // Exclude files larger than 2GB
+    if(metadata->uncompressed_size > 0x80000000) {
+        log_printf("Skipping large file\n");
+        return -1;
+    }
+
     //log_printf("The segment %d has size: %lx and start at offset: %p\n", segment_id, metadata->uncompressed_size, (void*) metadata->data_offset);
 
     bar_context_create(&(session->context));
