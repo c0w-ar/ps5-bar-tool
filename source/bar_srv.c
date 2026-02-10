@@ -79,10 +79,6 @@ int bar_update_aad (int context, void* buf, int size) {
     args.aad_source = buf;
     args.aad_size = size;
 
-    for (int i = 0; i < 16; i++) {
-        printf("%02X%c", ((uint8_t*) buf)[i], (i == 15) ? '\n' : ':');
-    }
-
     int fd = get_bar_fd();
     ret = ioctl(fd,0xc0684204, &args);
     if (ret == 0) {

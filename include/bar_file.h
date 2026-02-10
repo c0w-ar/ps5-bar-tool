@@ -20,13 +20,14 @@ typedef struct _bar_file_header {
 
 typedef struct _bar_file_segment_metadata {
     int         segment_id;
-    int         segment_type;       // always 0 for archive.dat
+    uint16_t    padd_1;
+    uint16_t    part_number;       // always 0 for Normal File and 0, 1 , 2 for Special File
     uint64_t    data_offset;
     uint64_t    compressed_size;
     uint64_t    algorithm_type;     // always 3 for archive.dat
     uint64_t    algorithm_version;  // always 1 for archive.dat
     uint8_t     iv[12];
-    uint32_t    padd;
+    uint32_t    padd_2;
     uint64_t    uncompressed_size;
 } bar_file_segment_metadata;
 

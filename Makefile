@@ -7,27 +7,30 @@ endif
 
 # 2. Paths and Variables
 BIN_DIR := bin
-# Use the variable to define the ELF path consistently
-ELF     := $(BIN_DIR)/bar_tool.elf
-
 CFLAGS  := -Werror -Iinclude
-# Ensure any linker flags from prospero.mk are included
-LDFLAGS := 
-
-# 3. Source Files
 SRCS    := source/main.c source/bar_srv.c
+
+# 3. Define the 3 Output Targets
+ELF_INFO      := $(BIN_DIR)/ps5-bar-tool_info.elf
+ELF_SEGMENTS  := $(BIN_DIR)/ps5-bar-tool_dump_main_segments.elf
+ELF_ALL       := $(BIN_DIR)/ps5-bar-tool_dump_all.elf
+
+# --- Target-Specific Flags ---
+
+$(ELF_INFO):     CFLAGS += -DDUMP_MAIN_SEGMENTS=0 -DDUMP_FILES=0
+$(ELF_SEGMENTS): CFLAGS += -DDUMP_MAIN_SEGMENTS=1 -DDUMP_FILES=0
+$(ELF_ALL):      CFLAGS += -DDUMP_MAIN_SEGMENTS=1 -DDUMP_FILES=1
 
 # --- Rules ---
 
-all: $(ELF)
+# Build all three by default
+all: $(ELF_INFO) $(ELF_SEGMENTS) $(ELF_ALL)
 
-# Create the directory
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-# Build the ELF
-# We use $(BIN_DIR) as an order-only prerequisite
-$(ELF): $(SRCS) | $(BIN_DIR)
+# Generic rule to build any ELF from the same sources
+$(BIN_DIR)/%.elf: $(SRCS) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS)
 
 clean:
