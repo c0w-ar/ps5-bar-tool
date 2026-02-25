@@ -45,8 +45,8 @@ int main() {
     memcpy(bar_description, buffer + 0x100, 0x78);
     bar_user* user_list = buffer + 0x200;
 
-    log_printf("\n\n\n");
-    log_printf("|-- Backup and Restore File Information --|\n\n");
+    log_printf("\n\n");
+    log_printf("*** Backup and Restore File Information ***\n\n");
     log_printf("File version: %d\n", bar_file_version);
     log_printf("Software Version: ");
         for (int i = 3; i >= 0; i--) {
@@ -187,7 +187,9 @@ int read_header(bar_session* session) {
         goto cleanup;
     }
 
-    log_printf("Information in header:\n");
+    log_printf("\n\n");
+    log_printf("*** Information in header ***\n");
+    log_printf("\n");
     log_printf("Magic: %s\n", f_header->magic);
     log_printf("Mode: %d\n", f_header->mode);
     log_printf("Version: %d\n", f_header->version);
@@ -467,7 +469,7 @@ void print_files_message(void) {
 #if DUMP_FILES == 1
     log_printf("*** Listing and Dumping Embedded Files in BAR File - This may take several minutes ***\n");
 #elif DUMP_SAVES == 1
-    log_printf("*** Listing and Dumping Embedded Save Files in BAR File***\n");
+    log_printf("*** Listing and Dumping Embedded Save Files in BAR File ***\n");
 #else
     log_printf("*** Listing Embedded Files in BAR File ***\n");
 #endif
