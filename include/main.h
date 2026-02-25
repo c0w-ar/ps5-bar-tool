@@ -27,5 +27,9 @@ uint64_t decrypt_segment_part(bar_session* session, void** buffer, int segment_i
 int read_from_archive (void* buffer, uint64_t size, uint64_t offset);
 int read_from_archive_number (uint64_t archive_number, void* buffer, uint64_t size, uint64_t offset);
 void log_printf(const char *format, ...);
+void print_files_message(void);
+int is_savedata_path(char* path);
+int should_dump(char* path);
+int should_print_file(char* path);
 
 #endif

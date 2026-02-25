@@ -75,7 +75,7 @@ int main() {
     for (int i=1; i<=5; i++) {
         char* dump_path;
         dump_path = malloc(0x100);
-        sprintf(dump_path, "/mnt/usb0/PS5/EXPORT/BACKUP/%s", segment_name[i-1]);
+        sprintf(dump_path, MAIN_DIR "%s", segment_name[i-1]);
         log_printf("Dumping segment %d to path: %s\n", i, dump_path);
         int fd_dump = open(dump_path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
         if (fd_dump == -1) {
@@ -83,15 +83,16 @@ int main() {
         }
         decrypted_size = decrypt_segment(&session, &buffer, i, 0, 0);
         log_printf("Decrypted Size: %lu\n", decrypted_size);
+        log_printf("\n\n");
         write(fd_dump, buffer, decrypted_size);
         close(fd_dump);
         free(dump_path);
     }
 #endif
 
-#if DUMP_FILES == 1
-    log_printf("*** Listing and Dumping Embedded Files in BAR File - This may take several minutes ***\n");
-    
+    print_files_message();
+
+#if DUMP_FILES == 1 || DUMP_SAVES == 1
     char *main_dirs[] = {
         DUMP_DIR,
         DUMP_DIR "/system_data",
@@ -107,47 +108,50 @@ int main() {
 
     // Let's create directory structure from Segment 2
     bar_dir_file* dir_list = NULL;
+    struct stat st;
+    char* dir_path = malloc(0x500);;
+
     decrypt_segment(&session, (void**) &dir_list, 2, 0, 0);
     for (int i=0; i<bar_total_dirs; i++) {
-        struct stat st;
-        char* dir_path;
-        dir_path = malloc(0x500);
-        sprintf(dir_path, DUMP_DIR "%s", dir_list[i].path);
-        
-        // Create if not exists
-        if (stat(dir_path, &st) == -1)
-            if(mkdir(dir_path, 0777) == -1) 
-                log_printf("Could not create dir: %s\n", dir_path);
+        if (should_dump(dir_list[i].path)) {
+            sprintf(dir_path, DUMP_DIR "%s", dir_list[i].path);
+            // Create if not exists
+            if (stat(dir_path, &st) == -1)
+                if(mkdir(dir_path, 0777) == -1)
+                    log_printf("Could not create dir: %s\n", dir_path);
+        }
     }
-
-#else
-    log_printf("*** Listing Embedded Files in BAR File ***\n");
 #endif
 
     bar_dir_file* file_list = NULL;
     // Get File List from Segment 3
     decrypt_segment(&session, (void**) &file_list, 3, 0, 0);
-    for (int i=0; i<bar_total_files; i++) {
-        log_printf("Index: %04d Segment: %04X : %s\n", i+0x2710, file_list[i].path);
-#if DUMP_FILES == 1
-        char* dump_path;
-        dump_path = malloc(0x500);
-        sprintf(dump_path, DUMP_DIR "%s", file_list[i].path);
-        int fd_dump = open(dump_path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
-        if (fd_dump == -1) {
-            log_printf("\nError opening file for write: %s\n", dump_path);
-            continue;
-        }
 
-        // Embedded Files start at index 0x2710
-        decrypted_size = decrypt_segment(&session, &buffer, i+0x2710, (int) file_list[i].special, 0);
-        if (decrypted_size>0)
-            write(fd_dump, buffer, decrypted_size);
-        close(fd_dump);
-        free(dump_path);
-#endif
-        log_printf("\n");
+    for (int i=0; i<bar_total_files; i++) {
+        if (should_print_file(file_list[i].path)) {
+            log_printf("Index: %04d Segment: %04x : %s\n", i, i+0x2710, file_list[i].path);
+            if (should_dump(file_list[i].path)) {
+                char* dump_path;
+                dump_path = malloc(0x500);
+                sprintf(dump_path, DUMP_DIR "%s", file_list[i].path);
+                int fd_dump = open(dump_path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+                if (fd_dump == -1) {
+                    log_printf("\nError opening file for write: %s\n", dump_path);
+                    continue;
+                }
+
+                // Embedded Files start at index 0x2710
+                decrypted_size = decrypt_segment(&session, &buffer, i+0x2710, (int) file_list[i].special, 0);
+                if (decrypted_size>0)
+                    write(fd_dump, buffer, decrypted_size);
+                close(fd_dump);
+                free(dump_path);
+            }
+            log_printf("\n");
+        }
     }
+
+    log_printf("\nps5-bar-tool finished!!\n");
     log_printf("\n\n\n");
 
 cleanup:
@@ -189,11 +193,12 @@ int read_header(bar_session* session) {
     log_printf("Version: %d\n", f_header->version);
     log_printf("Key: ");
     for (int i = 0; i < 16; i++) {
-        log_printf("%02X%c", f_header->key[i], (i == 15) ? '\n' : ':');
+        log_printf("%02X", f_header->key[i]);
     }
+    log_printf("\n");
     log_printf("IV: ");
     for (int i = 0; i < 12; i++) {
-        log_printf("%02X%c", f_header->iv[i], (i == 11) ? '\n' : ':');
+        log_printf("%02X", f_header->iv[i]);
     }
     log_printf("Segments: 0x%x\n", (int) f_header->n_segments);
     log_printf("Data Offset: 0x%p\n", (void*) f_header->data_offset);
@@ -208,25 +213,13 @@ int read_header(bar_session* session) {
     // Read Segments Metadata Table (N*0x40)
     session->segment_metadata = malloc(sizeof(bar_file_segment_metadata) * session->n_segments);
     read(file_fd, session->segment_metadata, sizeof(bar_file_segment_metadata) * session->n_segments);
-    log_printf("First Metadata: ");
-    for (int i = 0; i < 0x40; i++) {
-        log_printf("%02X%c", ((uint8_t*)session->segment_metadata)[i], (i == 0x3F) ? '\n' : ':');
-    }
 
     // Read Segments Hash Table (N*0x30)
     session->segment_hash = malloc(sizeof(bar_file_segment_hash) * session->n_segments);
     read(file_fd, session->segment_hash, sizeof(bar_file_segment_hash) * session->n_segments);
-    log_printf("First Hash: ");
-    for (int i = 0; i < 0x30; i++) {
-        log_printf("%02X%c", ((uint8_t*)session->segment_hash)[i], (i == 0x2F) ? '\n' : ':');
-    }
 
     // Read Complete Header Hash (0x10 but PS5 reads 0x20)
     read(file_fd, session->complete_hash, 0x20);
-    log_printf("Complete_Hash: ");
-    for (int i = 0; i < 0x20; i++) {
-        log_printf("%02X%c", session->complete_hash[i], (i == 0x1F) ? '\n' : ':');
-    }
 
     // Create context
     ret = bar_context_create(&session->context);
@@ -325,8 +318,6 @@ uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, in
         return -1;
     }
 
-    //log_printf("The segment %d has size: %lx and start at offset: %p\n", segment_id, metadata->uncompressed_size, (void*) metadata->data_offset);
-
     bar_context_create(&(session->context));
     bar_context_init(session->context, session->version, session->mode, session->key, metadata->iv);
 
@@ -343,7 +334,7 @@ uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, in
     bar_context_destroy(session->context);
     
     free(encrypted_data);
-    
+
     return metadata->uncompressed_size;
 
 }
@@ -378,8 +369,6 @@ uint64_t decrypt_segment_part(bar_session* session, void** buffer, int segment_i
         log_printf("Could not find segment with ID: %d\n", segment_id);
         return -1;
     }
-
-    //log_printf("The segment %d has size: %lx and start at offset: %p\n", segment_id, metadata->uncompressed_size, (void*) metadata->data_offset);
 
     bar_context_create(&(session->context));
     bar_context_init(session->context, session->version, session->mode, session->key, metadata->iv);
@@ -472,4 +461,49 @@ void log_printf(const char *format, ...) {
         va_end(args);
         fclose(log_file);
     }
+}
+
+void print_files_message(void) {
+#if DUMP_FILES == 1
+    log_printf("*** Listing and Dumping Embedded Files in BAR File - This may take several minutes ***\n");
+#elif DUMP_SAVES == 1
+    log_printf("*** Listing and Dumping Embedded Save Files in BAR File***\n");
+#else
+    log_printf("*** Listing Embedded Files in BAR File ***\n");
+#endif
+    log_printf("\n");
+}
+
+int is_savedata_path(char* path) {
+    if (strstr(path, "savedata"))
+        return 1;
+    if (strcmp(path, "/user/home")==0) // "/user/home"
+        return 1;
+    if (strstr(path, "/user/home")!=0 && strlen(path)==19) // "/user/home/AABBCCDD"
+        return 1;
+    return 0;
+}
+
+int should_dump(char* path) {
+#if DUMP_FILES == 1
+    return 1;
+#elif DUMP_SAVES == 1
+    if (is_savedata_path(path))
+        return 1;
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+int should_print_file(char* path) {
+#if DUMP_FILES == 1
+    return 1;
+#elif DUMP_SAVES == 1
+    if (is_savedata_path(path))
+        return 1;
+    return 0;
+#else
+    return 1;
+#endif
 }
