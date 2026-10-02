@@ -8,6 +8,9 @@
 #define MAIN_DIR "/mnt/usb0/PS5/EXPORT/BACKUP/"
 #define DUMP_DIR MAIN_DIR "DUMP"
 
+// Must stay a multiple of the 0x40000 chunk bar_update_decrypt sends to the device
+#define DECRYPT_CHUNK_SIZE 0x100000
+
 typedef struct _bar_session {
     int         context;
     int         mode;
@@ -23,9 +26,13 @@ typedef struct _bar_session {
 int main(void);
 int read_header(bar_session* session);
 uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, int special_file, int flag_validate);
+bar_file_segment_metadata* find_segment(bar_session* session, int segment_id);
+int decrypt_segment_to_fd(bar_session* session, int fd_out, int segment_id, int special_file);
+int write_all(int fd, void* buffer, uint64_t size);
 uint64_t decrypt_segment_part(bar_session* session, void** buffer, int segment_id, uint16_t part_number, int flag_validate);
 int read_from_archive (void* buffer, uint64_t size, uint64_t offset);
 int read_from_archive_number (uint64_t archive_number, void* buffer, uint64_t size, uint64_t offset);
+void close_archive_fd(void);
 void log_printf(const char *format, ...);
 void print_files_message(void);
 int is_savedata_path(char* path);

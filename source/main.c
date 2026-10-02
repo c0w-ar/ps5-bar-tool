@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 char *segment_name[] = {
         "1_tmpBackupInfo.dat",
@@ -141,9 +142,7 @@ int main() {
                 }
 
                 // Embedded Files start at index 0x2710
-                decrypted_size = decrypt_segment(&session, &buffer, i+0x2710, (int) file_list[i].special, 0);
-                if (decrypted_size>0)
-                    write(fd_dump, buffer, decrypted_size);
+                decrypt_segment_to_fd(&session, fd_dump, i+0x2710, (int) file_list[i].special);
                 close(fd_dump);
                 free(dump_path);
             }
@@ -157,6 +156,7 @@ int main() {
 cleanup:
     // Free Pointers
     if(file_list) free(file_list);
+    close_archive_fd();
     close_bar_fd();
     if(session.segment_metadata) free(session.segment_metadata);
     if(session.segment_hash) free(session.segment_hash);
@@ -291,13 +291,9 @@ uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, in
         return -1;
     }
 
-    for (int i=0; i<=session->n_segments; i++) {
-        metadata = &session->segment_metadata[i];   
-        if (metadata->segment_id == segment_id) {
-            meta_index = i;
-            break;
-        }
-    }
+    metadata = find_segment(session, segment_id);
+    if (metadata != NULL)
+        meta_index = 0;
 
     if (flag_validate) {
         for (int i=0; i<=session->n_segments; i++) {
@@ -339,6 +335,84 @@ uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, in
 
     return metadata->uncompressed_size;
 
+}
+
+bar_file_segment_metadata* find_segment(bar_session* session, int segment_id) {
+    for (uint64_t i=0; i<session->n_segments; i++) {
+        if (session->segment_metadata[i].segment_id == segment_id)
+            return &session->segment_metadata[i];
+    }
+    return NULL;
+}
+
+// Decrypts a segment in chunks and writes it to fd_out, so big files never sit fully in memory
+int decrypt_segment_to_fd(bar_session* session, int fd_out, int segment_id, int special_file) {
+    bar_file_segment_metadata* metadata;
+    void* encrypted_data = NULL;
+    void* decrypted_data = NULL;
+    uint64_t done = 0;
+    int ret = 0;
+
+    if(special_file) {
+        log_printf("Skipping special file\n");
+        return -1;
+    }
+
+    metadata = find_segment(session, segment_id);
+    if (metadata == NULL) {
+        log_printf("Could not find segment with ID: %d\n", segment_id);
+        return -1;
+    }
+
+    encrypted_data = malloc(DECRYPT_CHUNK_SIZE);
+    decrypted_data = malloc(DECRYPT_CHUNK_SIZE);
+    if (encrypted_data == NULL || decrypted_data == NULL) {
+        log_printf("Could not allocate decrypt buffers\n");
+        ret = -1;
+        goto cleanup;
+    }
+
+    bar_context_create(&(session->context));
+    bar_context_init(session->context, session->version, session->mode, session->key, metadata->iv);
+
+    while (done < metadata->uncompressed_size) {
+        uint64_t chunk = metadata->uncompressed_size - done;
+        if (chunk > DECRYPT_CHUNK_SIZE)
+            chunk = DECRYPT_CHUNK_SIZE;
+
+        if (read_from_archive(encrypted_data, chunk, metadata->data_offset + done) == -1) {
+            ret = -1;
+            break;
+        }
+
+        bar_update_decrypt(session->context, decrypted_data, encrypted_data, (int) chunk);
+
+        if (write_all(fd_out, decrypted_data, chunk) == -1) {
+            log_printf("Couldn't write decrypted data\n");
+            ret = -1;
+            break;
+        }
+        done += chunk;
+    }
+
+    bar_context_destroy(session->context);
+    session->context = 0;
+
+cleanup:
+    if (encrypted_data) free(encrypted_data);
+    if (decrypted_data) free(decrypted_data);
+    return ret;
+}
+
+int write_all(int fd, void* buffer, uint64_t size) {
+    while (size > 0) {
+        ssize_t written = write(fd, buffer, size);
+        if (written <= 0)
+            return -1;
+        buffer += written;
+        size -= written;
+    }
+    return 0;
 }
 
 // buffer pointer should not be allocated
@@ -408,7 +482,7 @@ int read_from_archive (void* buffer, uint64_t size, uint64_t offset) {
     }
     // Splitted on 2 files
     else {
-        int size_tmp = 0xFFFF0000 - offset % 0xFFFF0000;
+        uint64_t size_tmp = 0xFFFF0000 - offset % 0xFFFF0000;
         ret = read_from_archive_number(archive_number, buffer, size_tmp, offset_tmp);
         if (ret == -1) {
             log_printf("Could not read from splitted file %d", archive_number);
@@ -420,10 +494,20 @@ int read_from_archive (void* buffer, uint64_t size, uint64_t offset) {
     
 }
 
+// Keep the last archive open, chunked reads hit the same file many times in a row
+static int archive_fd = -1;
+static uint64_t archive_fd_number = 0;
+
+void close_archive_fd(void) {
+    if (archive_fd != -1) {
+        close(archive_fd);
+        archive_fd = -1;
+    }
+}
+
 int read_from_archive_number (uint64_t archive_number, void* buffer, uint64_t size, uint64_t offset) {
-    int file_fd;
     char file[0x40];
-    int ret=0;
+    uint64_t done = 0;
 
     if (archive_number == 0) {
         sprintf(file, MAIN_DIR "archive.dat");
@@ -432,19 +516,30 @@ int read_from_archive_number (uint64_t archive_number, void* buffer, uint64_t si
         sprintf(file, MAIN_DIR "archive%04lu.dat", archive_number);
     }
 
-    file_fd = open(file, O_RDONLY);
-    if (file_fd == -1) {
-        log_printf("File %s not found\n", file);
-        return -1;
-    }
-    else {
-        ret = pread(file_fd, buffer, size, offset);
-        if (ret == -1) {
-            log_printf("Couldn't read from file %s size %lu offset %lu\n", file, size, offset);
+    if (archive_fd == -1 || archive_fd_number != archive_number) {
+        close_archive_fd();
+        archive_fd = open(file, O_RDONLY);
+        if (archive_fd == -1) {
+            log_printf("File %s not found\n", file);
+            return -1;
         }
-        close(file_fd);
-        return ret;
+        archive_fd_number = archive_number;
     }
+
+    // pread can return less than requested, keep reading until done
+    while (done < size) {
+        ssize_t ret = pread(archive_fd, buffer + done, size - done, offset + done);
+        if (ret == -1) {
+            log_printf("Couldn't read from file %s size %lu offset %lu errno %d\n", file, size - done, offset + done, errno);
+            return -1;
+        }
+        if (ret == 0) {
+            log_printf("Unexpected end of file %s at offset %lu\n", file, offset + done);
+            return -1;
+        }
+        done += ret;
+    }
+    return 0;
 }
 
 void log_printf(const char *format, ...) {
