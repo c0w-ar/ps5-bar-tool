@@ -1,6 +1,7 @@
 #include "main.h"
 #include "bar_file.h"
 #include "bar_srv.h"
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,6 +25,7 @@ int main() {
     int ret;
     void* buffer = NULL;
     uint64_t decrypted_size;
+    mkpath(DATA_DIR, 0777);
 
     // Read header size 0x58
     read_header(&session);
@@ -161,6 +163,24 @@ cleanup:
     if(session.segment_metadata) free(session.segment_metadata);
     if(session.segment_hash) free(session.segment_hash);
     if (buffer) free(buffer);
+}
+
+int mkpath(char* path, mode_t mode) {
+    assert(path && *path);
+
+    for (char* p = strchr(path + 1, '/'); p; p = strchr(p + 1, '/')) {
+        *p = '\0';
+        int result = mkdir(path, mode);
+        *p = '/';
+
+        if (result == -1) {
+            if (errno != EEXIST) {
+                return -1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 int read_header(bar_session* session) {
@@ -551,7 +571,7 @@ void log_printf(const char *format, ...) {
     va_end(args);
 
     // 2. Output to log file
-    FILE *log_file = fopen(MAIN_DIR "ps5-bar-tool.log", "a");
+    FILE *log_file = fopen(DATA_DIR "ps5-bar-tool.log", "a");
     if (log_file != NULL) {
         va_start(args, format);
         vfprintf(log_file, format, args);

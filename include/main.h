@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include "bar_file.h"
 
+#define DATA_DIR "/data/ps5-bar-tool/"
 #define MAIN_DIR "/mnt/usb0/PS5/EXPORT/BACKUP/"
 #define DUMP_DIR MAIN_DIR "DUMP"
 
@@ -23,6 +24,7 @@ typedef struct _bar_session {
     uint8_t     complete_hash[16];
 } bar_session;
 
+int mkpath(char* path, mode_t mode);
 int main(void);
 int read_header(bar_session* session);
 uint64_t decrypt_segment(bar_session* session, void** buffer, int segment_id, int special_file, int flag_validate);
